@@ -1,0 +1,103 @@
+---
+title: "Practical ML Project"
+output: html_document
+---
+
+#Project Details
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.The data sources are provided in the r code. The training data set has the variable 'classe' that specifies how the activity was undertaken. Classe A is for the way an activity was specified to be correctly done. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(caret,warn.conflicts=F, quietly=T)
+library(parallel,warn.conflicts=F, quietly=T)
+library(doParallel,warn.conflicts=F, quietly=T)
+library(rattle,warn.conflicts=F, quietly=T)
+```
+
+####Reading data from the source
+```{r cachedChunk, cache=TRUE}
+DataTrain<-read.csv(file="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+DataTest<-read.csv(file="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+```
+
+####Looking at the structure of training and testing data
+```{r}
+str(DataTrain)
+str(DataTest)
+```
+I have removed the columns with NA values both from training and testing data.
+```{r echo=TRUE, results='hide'}
+DataTrainSub<-DataTrain[,colSums(is.na(DataTrain))==0]
+DataTestSub<-DataTest[,colSums(is.na(DataTest))==0]
+str(DataTrainSub)
+str(DataTestSub)
+```
+Given the number of columns in training data are still more than those in the testing data, I have created data frame with common column names. Training data set will still have one more column, that is, the classe variable. The testing data had one extra column that has now been removed.
+```{r}
+nm=intersect(names(DataTrainSub),names(DataTestSub))
+
+selectTrainData<-DataTrainSub[,which(names(DataTrainSub) %in% nm)]
+selectTrainData<-cbind(selectTrainData,DataTrainSub$classe)
+colnames(selectTrainData)[colnames(selectTrainData)=="DataTrainSub$classe"] <- "classe"
+
+selectTestData<-DataTestSub[,which(names(DataTestSub) %in% nm)]
+
+####Followig removes the first seven columns from both the data sets as these columns have factual data and do not appear to comprise of predictors. 
+selectTrainData<-selectTrainData[,-(1:7)]
+selectTestData<-selectTestData[,-(1:7)]
+```
+
+####I have now partitioned the training data into two separate data frames to enable setting up my model and validating the same. 
+```{r}
+inTrain<-createDataPartition(selectTrainData$classe,p=0.7,list=FALSE)
+SubTrain<-selectTrainData[inTrain,]
+SubTest<-selectTrainData[-inTrain,]
+```
+
+```{r}
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+fitControl <- trainControl(method = "cv",
+                           number = 5,
+                           allowParallel = TRUE)
+```
+I will now be testing three models on the training data to arrive at the model that fits with maximum accuracy.The models employed are - classification tree, random forest and gradient boosting method
+
+###Method: Classification Tree
+```{r}
+fitrpart <- train(classe~.,method="rpart",data=SubTrain,trControl = fitControl)
+save(fitrpart, file='./Modelrpart.RData')
+fancyRpartPlot(fitrpart$finalModel)
+predRpart<-predict(fitrpart,newdata=SubTest)
+confusionMatrix(SubTest$classe,predRpart)
+```
+Accuracy of Classification Tree Method appears on a very low side.
+
+###Method: Random Forest
+```{r}
+fit <- train(classe~.,method="rf",data=SubTrain,trControl = fitControl)
+save(fit, file='./Modelrf.RData')
+plot(fit)
+predRF<-predict(fit,newdata=SubTest)
+confusionMatrix(SubTest$classe,predRF)
+```
+Accuracy of Random Forest Method appears high, but let's compare it with GBM.
+
+###Method: Gradient Boosting Method
+```{r}
+fitgbm <- train(classe~.,method="gbm",data=SubTrain,trControl = fitControl,verbose=FALSE)
+save(fitgbm, file='./Modelgbm.RData')
+plot(fitgbm)
+predGBM<-predict(fitgbm,newdata=SubTest)
+confusionMatrix(SubTest$classe, predGBM)
+```
+Accuracy of GBM is lower than for RF.Therefore, we use RF method to predict he final test cases.
+```{r}
+stopCluster(cluster)
+registerDoSEQ()
+```
+
+```{r}
+TestPredictions <- predict(fit,newdata=selectTestData)
+TestPredictions
+```
